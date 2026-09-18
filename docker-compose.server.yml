@@ -6,7 +6,7 @@ services:
       NAPCAT_GID: ${NAPCAT_GID:-1000}
     ports:
       # 仅允许通过服务器本机或 SSH 隧道访问 NapCat WebUI。
-      - "127.0.0.1:6099:6099"
+      - '127.0.0.1:6099:6099'
     volumes:
       - napcat_qq_data:/app/.config/QQ
       - napcat_config:/app/napcat/config
@@ -14,11 +14,11 @@ services:
     restart: unless-stopped
     logging:
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: '10m'
+        max-file: '3'
 
   qq-bot:
-    build: .
+    image: ${QQ_BOT_IMAGE:-ghcr.io/fncheng/qqbot:latest}
     env_file: .env
     environment:
       NODE_ENV: production
@@ -32,12 +32,19 @@ services:
         condition: service_healthy
     ports:
       # 健康检查接口默认仅允许服务器本机访问。
-      - "127.0.0.1:3000:3000"
+      - '127.0.0.1:3000:3000'
     restart: unless-stopped
     logging:
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: '10m'
+        max-file: '3'
+
+  migration-files:
+    image: ${QQ_BOT_IMAGE:-ghcr.io/fncheng/qqbot:latest}
+    command: ['sh', '-c', 'cp /app/drizzle/0000_initial.sql /init/0000_initial.sql']
+    volumes:
+      - postgres_init:/init
+    restart: 'no'
 
   postgres:
     image: postgres:16-alpine
@@ -45,22 +52,26 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-qq_bot}
       POSTGRES_USER: ${POSTGRES_USER:-qq_bot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在.env中设置POSTGRES_PASSWORD}
+    depends_on:
+      migration-files:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
       interval: 5s
       timeout: 3s
       retries: 10
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./drizzle/0000_initial.sql:/docker-entrypoint-initdb.d/0000_initial.sql:ro
+      - postgres_init:/docker-entrypoint-initdb.d:ro
     restart: unless-stopped
     logging:
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: '10m'
+        max-file: '3'
 
 volumes:
   napcat_qq_data:
   napcat_config:
   napcat_plugins:
+  postgres_init:
   postgres_data:

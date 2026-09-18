@@ -22,7 +22,7 @@ PostgreSQL 容器：保存用户、群、会话和消息记录
 
 在同一台 Ubuntu 服务器上只安装：
 
-- Git，用于获取项目代码。
+- curl，用于下载部署包。
 - Docker Engine，用于运行容器。
 - Docker Compose Plugin，用于管理多个容器。
 
@@ -31,6 +31,7 @@ PostgreSQL 容器：保存用户、群、会话和消息记录
 - 不需要单独安装 Node.js 或 pnpm，`qq-bot` 镜像中已经包含运行环境。
 - 不需要单独安装 PostgreSQL，Compose 会启动 PostgreSQL 容器。
 - 不需要安装桌面版 QQ，NapCatQQ Docker 镜像包含服务器运行所需环境。
+- 不需要克隆项目源码或在服务器构建业务镜像，Compose 会从 GHCR 拉取镜像。
 - 不需要把 QQ 密码写入项目，机器人账号通过 NapCatQQ WebUI 扫码登录。
 
 需要提前准备：
@@ -43,11 +44,11 @@ NapCatQQ 和 OneBot 11 不是 QQ 官方开放平台。使用普通 QQ 账号进�
 
 ### 1.2 方案对比
 
-| 方案 | 复杂度 | 维护性 | 网络暴露 | 实施成本 | 适用场景 |
-| --- | --- | --- | --- | --- | --- |
-| 同机三个独立容器 | 低 | 高 | 最少 | 低 | 首次部署、个人服务器，本文推荐 |
-| NapCatQQ 安装在宿主机，其他组件使用 Docker | 中 | 中 | 较少 | 中 | 已有可用的宿主机 NapCatQQ |
-| NapCatQQ 和业务服务部署在不同服务器 | 高 | 中 | 需要跨主机 WebSocket | 高 | 需要账号层与业务层隔离的大型部署 |
+| 方案                                       | 复杂度 | 维护性 | 网络暴露             | 实施成本 | 适用场景                         |
+| ------------------------------------------ | ------ | ------ | -------------------- | -------- | -------------------------------- |
+| 同机三个独立容器                           | 低     | 高     | 最少                 | 低       | 首次部署、个人服务器，本文推荐   |
+| NapCatQQ 安装在宿主机，其他组件使用 Docker | 中     | 中     | 较少                 | 中       | 已有可用的宿主机 NapCatQQ        |
+| NapCatQQ 和业务服务部署在不同服务器        | 高     | 中     | 需要跨主机 WebSocket | 高       | 需要账号层与业务层隔离的大型部署 |
 
 本文采用第一种方案。三个组件处于同一个 Docker 网络中，但仍然是三个独立容器，可以分别更新和重启。
 
@@ -79,7 +80,7 @@ NapCatQQ 和 OneBot 11 不是 QQ 官方开放平台。使用普通 QQ 账号进�
 
 ```bash
 sudo apt update
-sudo apt install -y ca-certificates curl git
+sudo apt install -y ca-certificates curl
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
@@ -115,24 +116,78 @@ sudo docker compose version
 
 后续命令统一使用 `sudo docker`。如果需要免 `sudo` 使用 Docker，可以按照 Docker 官方文档将用户加入 `docker` 组，但需要注意：`docker` 组实际上具有接近 root 的权限。
 
-## 4. 获取项目代码
+## 4. 从 GitHub Release 获取部署文件
 
-选择一个服务器目录，例如 `/opt/qqbot`。将 `<仓库地址>` 替换为本项目真实 Git 地址：
+业务镜像发布在：
+
+```text
+ghcr.io/fncheng/qqbot
+```
+
+GitHub Actions 在以下情况自动发布镜像：
+
+- 推送到 `master`：更新 `latest` 和 `sha-<提交摘要>` 镜像标签。
+- 推送 `v*` Git 标签：发布 `v1.2.3`、`1.2.3`、`1.2` 等版本化标签，并创建同名 GitHub Release。
+- 在 GitHub Actions 页面手动运行工作流：按照当前分支或标签生成对应镜像标签。
+
+生产环境应使用不可变的版本标签或镜像 digest，不要长期跟随 `latest`。项目维护者可以这样发布版本：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+等待仓库的 `Publish GHCR image` 工作流成功后，GitHub Release 中会出现 `qqbot-deploy-v0.1.0.tar.gz`。
+
+### 4.1 下载版本化部署包
+
+在服务器上执行，将版本号替换成实际发布版本：
 
 ```bash
 sudo mkdir -p /opt/qqbot
 sudo chown "$USER":"$USER" /opt/qqbot
-git clone <仓库地址> /opt/qqbot
 cd /opt/qqbot
+
+VERSION=v0.1.0
+curl -fL -o "qqbot-deploy-${VERSION}.tar.gz" \
+  "https://github.com/fncheng/qqbot/releases/download/${VERSION}/qqbot-deploy-${VERSION}.tar.gz"
+tar -xzf "qqbot-deploy-${VERSION}.tar.gz"
 ```
 
-如果项目没有远程 Git 仓库，也可以使用 `scp`、SFTP 或部署平台将整个项目上传到 `/opt/qqbot`。不要上传本地 `.env`、`node_modules` 或包含密钥的文件。
-
-确认关键文件存在：
+部署包只包含运行服务器所需文件，不包含源码：
 
 ```bash
-ls Dockerfile docker-compose.server.yml .env.server.example drizzle/0000_initial.sql
+ls docker-compose.server.yml .env.server.example docs/deployment.md
 ```
+
+### 4.2 尚未发布版本时使用 `master`
+
+仅用于首次验证或测试环境：
+
+```bash
+sudo mkdir -p /opt/qqbot
+sudo chown "$USER":"$USER" /opt/qqbot
+cd /opt/qqbot
+
+curl -fLO https://raw.githubusercontent.com/fncheng/qqbot/master/docker-compose.server.yml
+curl -fLO https://raw.githubusercontent.com/fncheng/qqbot/master/.env.server.example
+```
+
+此方式默认拉取 `ghcr.io/fncheng/qqbot:latest`，部署文件与镜像可能在更新过程中短暂不一致，不建议作为长期生产更新方式。
+
+### 4.3 GHCR 镜像权限
+
+GHCR 包第一次发布时通常是私有的。进入 GitHub 仓库的 Packages 页面，将 `qqbot` 容器包设为 Public 后，服务器可以匿名拉取。
+
+如果保持私有，需要创建至少具有 `read:packages` 权限的 Personal Access Token（classic），然后在服务器登录：
+
+```bash
+export CR_PAT=<具有read:packages权限的Token>
+echo "$CR_PAT" | sudo docker login ghcr.io -u fncheng --password-stdin
+unset CR_PAT
+```
+
+不要把 GHCR Token 写入 `.env` 或 Compose 文件。
 
 ## 5. 创建服务器环境变量
 
@@ -159,6 +214,7 @@ nano .env
 必须修改以下字段：
 
 ```dotenv
+QQ_BOT_IMAGE=ghcr.io/fncheng/qqbot:v0.1.0
 POSTGRES_PASSWORD=替换为仅包含字母和数字的强密码
 NAPCAT_UID=上一步id-u输出的数字
 NAPCAT_GID=上一步id-g输出的数字
@@ -177,8 +233,11 @@ openssl rand -hex 32
 
 分别将两次输出填入 `POSTGRES_PASSWORD` 和 `NAPCAT_TOKEN`。不要在值两侧添加引号或空格。
 
+从版本化 GitHub Release 解压的 `.env.server.example` 已经指向对应版本镜像；仍应核对 `QQ_BOT_IMAGE` 与下载的发布版本一致。
+
 配置含义：
 
+- `QQ_BOT_IMAGE`：业务镜像完整地址。生产环境填写与部署包一致的版本，例如 `ghcr.io/fncheng/qqbot:v0.1.0`。
 - `POSTGRES_PASSWORD`：PostgreSQL 数据库密码，仅供容器内部连接使用。
 - `NAPCAT_TOKEN`：本项目连接 NapCatQQ WebSocket 时使用的鉴权 Token，稍后还要在 NapCatQQ WebUI 中填写同一个值。
 - `BOT_OWNER_QQ`：机器人所有者的个人 QQ 号，可以留空。它不是机器人 QQ 号，当前版本也没有额外的所有者管理指令。
@@ -204,10 +263,10 @@ sudo docker compose -f docker-compose.server.yml logs --tail=200 napcat
 
 日志中会显示 NapCatQQ WebUI 地址和首次登录 Token。这里的 WebUI Token 只用于登录 NapCatQQ 管理页面，不是 `.env` 中的 `NAPCAT_TOKEN`。
 
-| Token | 用途 | 从哪里获得或设置 |
-| --- | --- | --- |
-| WebUI Token | 登录 NapCatQQ 管理页面 | NapCatQQ 首次启动日志 |
-| `NAPCAT_TOKEN` | 保护 OneBot WebSocket | 由你生成，同时填写到 `.env` 和 NapCatQQ 网络配置 |
+| Token          | 用途                   | 从哪里获得或设置                                 |
+| -------------- | ---------------------- | ------------------------------------------------ |
+| WebUI Token    | 登录 NapCatQQ 管理页面 | NapCatQQ 首次启动日志                            |
+| `NAPCAT_TOKEN` | 保护 OneBot WebSocket  | 由你生成，同时填写到 `.env` 和 NapCatQQ 网络配置 |
 
 ## 7. 通过 SSH 隧道打开 NapCatQQ WebUI
 
@@ -266,12 +325,13 @@ http://127.0.0.1:6099/webui
 sudo docker compose -f docker-compose.server.yml logs --tail=100 napcat
 ```
 
-## 10. 构建并启动机器人业务服务
+## 10. 拉取并启动机器人业务服务
 
-首次部署需要构建本项目镜像：
+服务器不构建业务镜像。先从 GHCR 拉取 `.env` 中 `QQ_BOT_IMAGE` 指定的镜像：
 
 ```bash
-sudo docker compose -f docker-compose.server.yml up -d --build qq-bot
+sudo docker compose -f docker-compose.server.yml pull qq-bot migration-files
+sudo docker compose -f docker-compose.server.yml up -d qq-bot
 ```
 
 查看三个容器和机器人日志：
@@ -352,11 +412,11 @@ pong
 
 ### 12.3 内置指令
 
-| 指令 | 作用 |
-| --- | --- |
-| `/ping` | 检查机器人是否能够正常回复 |
-| `/help` | 查看可用指令 |
-| `/clear` | 清除当前会话历史 |
+| 指令     | 作用                       |
+| -------- | -------------------------- |
+| `/ping`  | 检查机器人是否能够正常回复 |
+| `/help`  | 查看可用指令               |
+| `/clear` | 清除当前会话历史           |
 
 ## 13. 日常运维命令
 
@@ -395,12 +455,17 @@ sudo docker compose -f docker-compose.server.yml down
 sudo docker compose -f docker-compose.server.yml up -d
 ```
 
-更新项目代码并重建业务镜像：
+更新到新版本：
 
 ```bash
-git pull
-sudo docker compose -f docker-compose.server.yml up -d --build qq-bot
+nano .env
+sudo docker compose -f docker-compose.server.yml pull qq-bot migration-files
+sudo docker compose -f docker-compose.server.yml up -d qq-bot
 ```
+
+先将 `.env` 的 `QQ_BOT_IMAGE` 改成目标版本，再执行拉取和启动命令。`migration-files` 与 `qq-bot` 必须使用同一个镜像版本。
+
+如果使用新的 GitHub Release 部署包，先备份当前 `.env`，解压新部署包覆盖 Compose 和文档，再恢复 `.env` 并更新 `QQ_BOT_IMAGE`。不要用发布包中的模板覆盖包含真实密钥的 `.env`。
 
 不要执行 `docker compose down -v`。参数 `-v` 会删除 PostgreSQL、NapCatQQ 登录状态和配置对应的命名卷。
 
@@ -450,7 +515,18 @@ sudo docker compose -f docker-compose.server.yml logs --tail=200 qq-bot napcat p
 
 ### 14.5 PostgreSQL 初始化迁移没有执行
 
-`drizzle/0000_initial.sql` 只会在 PostgreSQL 数据卷第一次创建时自动执行。已有数据库不得通过删除数据卷来强制重跑迁移，应人工检查数据库状态并执行所需迁移。
+业务镜像内包含 `/app/drizzle/0000_initial.sql`。`migration-files` 一次性容器会先把它复制到 `postgres_init` 命名卷，PostgreSQL 第一次创建数据卷时再自动执行。
+
+检查初始化文件容器：
+
+```bash
+sudo docker compose -f docker-compose.server.yml ps -a migration-files
+sudo docker compose -f docker-compose.server.yml logs migration-files
+```
+
+`migration-files` 正常状态是退出码 `0`。如果它失败，PostgreSQL 不会启动。
+
+初始化 SQL 只会在 PostgreSQL 数据卷第一次创建时执行。已有数据库不得通过删除数据卷来强制重跑迁移，应人工检查数据库状态并执行所需迁移。
 
 进入 PostgreSQL 容器：
 
@@ -470,12 +546,15 @@ sudo docker compose -f docker-compose.server.yml exec postgres \
 - NapCatQQ WebUI `6099` 仅绑定 `127.0.0.1`，通过 SSH 隧道访问。
 - 定期备份 PostgreSQL 数据和 NapCatQQ 配置。
 - 更新前先查看 NapCatQQ 与本项目变更说明，并在维护窗口操作。
+- 生产环境的 `QQ_BOT_IMAGE` 使用版本标签或 digest，不长期使用 `latest`。
 - 不使用 `docker compose down -v`，除非明确准备删除全部持久化数据。
 
 ## 16. 官方参考资料
 
 - [Docker Engine Ubuntu 安装文档](https://docs.docker.com/engine/install/ubuntu/)
 - [Docker Compose Plugin 安装文档](https://docs.docker.com/compose/install/linux/)
+- [GitHub Container Registry 使用文档](https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
+- [GitHub Actions 发布 Docker 镜像](https://docs.github.com/actions/tutorials/publish-packages/publish-docker-images)
 - [NapCatQQ 安装文档](https://napneko.github.io/guide/install)
 - [NapCatQQ WebUI 和 OneBot 网络配置](https://napneko.github.io/config/basic)
 - [NapCat Docker 仓库说明](https://github.com/NapNeko/NapCat-Docker)

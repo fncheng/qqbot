@@ -8,6 +8,7 @@
 - `/ping`、`/help`、`/clear`，群命令同样必须 `@机器人`。
 - PostgreSQL 会话持久化，OpenAI Responses API（`store: false`），OneBot 鉴权、重连、echo 关联与超时。
 - 单进程限流、五分钟消息去重、按会话串行、健康检查与优雅退出。
+- GitHub Actions 自动发布 `linux/amd64` 和 `linux/arm64` 的 GHCR 镜像，服务器无需克隆源码或现场构建。
 
 ## 工作原理
 
@@ -118,14 +119,16 @@ pnpm dev
 项目提供两种 Compose 配置：
 
 - `docker-compose.yml`：只启动机器人业务服务和 PostgreSQL，适用于已经在宿主机或其他服务器运行 NapCatQQ 的环境。
-- `docker-compose.server.yml`：启动 NapCatQQ、机器人业务服务和 PostgreSQL 三个独立容器，推荐用于新 Linux 服务器。
+- `docker-compose.server.yml`：从 `ghcr.io/fncheng/qqbot` 拉取业务镜像，并启动 NapCatQQ、机器人业务服务和 PostgreSQL，推荐用于新 Linux 服务器。
 
-首次部署整套服务时，按照 [Linux 服务器 Docker 部署指南](docs/deployment.md) 使用服务器环境变量模板：
+首次部署整套服务时，不需要克隆项目源码。按照 [Linux 服务器 Docker 部署指南](docs/deployment.md) 下载 GitHub Release 部署包，配置服务器环境变量后启动：
 
 ```bash
 cp .env.server.example .env
 docker compose -f docker-compose.server.yml up -d
 ```
+
+生产环境应将 `.env` 中的 `QQ_BOT_IMAGE` 固定为发布版本，例如 `ghcr.io/fncheng/qqbot:v0.1.0`，避免长期跟随 `latest`。
 
 如果只需要启动机器人业务服务和 PostgreSQL，确保 `.env` 已正确填写，然后运行：
 
@@ -204,10 +207,10 @@ pong
 
 ### 4. 内置指令
 
-| 指令 | 作用 |
-| --- | --- |
-| `/ping` | 检查机器人是否能够正常回复 |
-| `/help` | 显示当前可用指令 |
+| 指令     | 作用                               |
+| -------- | ---------------------------------- |
+| `/ping`  | 检查机器人是否能够正常回复         |
+| `/help`  | 显示当前可用指令                   |
 | `/clear` | 清除当前私聊或当前群成员的对话历史 |
 
 群聊中使用指令时同样必须 `@机器人`，例如：
