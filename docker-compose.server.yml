@@ -1,0 +1,66 @@
+services:
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    environment:
+      NAPCAT_UID: ${NAPCAT_UID:-1000}
+      NAPCAT_GID: ${NAPCAT_GID:-1000}
+    ports:
+      # 仅允许通过服务器本机或 SSH 隧道访问 NapCat WebUI。
+      - "127.0.0.1:6099:6099"
+    volumes:
+      - napcat_qq_data:/app/.config/QQ
+      - napcat_config:/app/napcat/config
+      - napcat_plugins:/app/napcat/plugins
+    restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  qq-bot:
+    build: .
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-qq_bot}:${POSTGRES_PASSWORD:?请在.env中设置POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-qq_bot}
+      # Compose 内部通过服务名连接 NapCat，不需要暴露 3001 端口。
+      NAPCAT_WS_URL: ws://napcat:3001
+    depends_on:
+      napcat:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    ports:
+      # 健康检查接口默认仅允许服务器本机访问。
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-qq_bot}
+      POSTGRES_USER: ${POSTGRES_USER:-qq_bot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在.env中设置POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./drizzle/0000_initial.sql:/docker-entrypoint-initdb.d/0000_initial.sql:ro
+    restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  napcat_qq_data:
+  napcat_config:
+  napcat_plugins:
+  postgres_data:

@@ -2,7 +2,7 @@
 
 > 技术路线：NapCatQQ + OneBot 11 + TypeScript + Node.js + PostgreSQL  
 > 适用场景：个人 QQ 机器人、群聊机器人、AI 对话机器人、群管理机器人、Agent 实验项目  
-> 文档版本：V1.0  
+> 文档版本：V1.1
 > 日期：2026-09-17
 
 ---
@@ -1650,3 +1650,231 @@ MVP 完成标准：
 - [ ] Docker Compose 可以启动项目
 
 完成以上内容后，即可进入 Agent Tool 开发阶段。
+
+---
+
+# 35. V1.1 实施决策
+
+本节补齐 V1.0 中影响 MVP 落地的设计边界。实现时以本节为准；前文章节用于说明总体目标和后续演进方向。
+
+## 35.1 本次实施范围
+
+本次实现 Phase 0 至 Phase 5 的可运行代码骨架，并纳入 MVP 必需的基础能力：
+
+- TypeScript 工程、配置校验、结构化日志和 Fastify 健康检查
+- OneBot 11 正向 WebSocket 连接、鉴权、断线重连、请求响应关联和调用超时
+- 私聊、群聊消息映射与文本消息发送
+- `/ping`、`/help`、`/clear` 指令
+- 私聊 AI 对话与群聊 `@机器人` 后的 AI 对话
+- PostgreSQL 用户、群、会话和消息持久化
+- 单进程内存限流、消息去重和同一会话串行处理
+- 全局异常处理、优雅退出、Docker Compose、部署说明和核心单元测试
+
+以下内容不属于本次实现：
+
+- NapCatQQ 的安装、QQ 登录和账号验证；这些步骤需要使用者在目标环境中人工完成
+- Redis、Agent Tool Calling、长期记忆、管理后台和多平台 Gateway
+- 图片、语音、视频等多模态消息理解
+- 群管理写操作和主动批量发送
+
+## 35.2 OneBot 连接方案对比
+
+| 方案 | 复杂度 | 性能 | 维护性 | 扩展性 | 实施成本 | 适用场景 |
+|---|---:|---:|---:|---:|---:|---|
+| `node-napcat-ts` | 低 | 高 | 中 | 高 | 低 | 需要快速使用大量 NapCat 专有 API |
+| 自建最小 OneBot 11 正向 WebSocket Client | 中 | 高 | 高 | 中 | 中 | 只实现 MVP API，并优先保持协议边界稳定 |
+| OneBot 11 反向 WebSocket Server | 中 | 高 | 中 | 中 | 中 | NapCat 主动连接业务服务或网络拓扑要求反向连接 |
+
+推荐使用“自建最小 OneBot 11 正向 WebSocket Client”。原因如下：
+
+- 当前只需要消息事件和少量发送 API，自建客户端范围有限
+- 业务服务主动连接 `NAPCAT_WS_URL`，与已有配置模型一致
+- 可以明确控制鉴权、`echo` 关联、超时、重连和关闭行为
+- Gateway 只依赖 OneBot 11 数据模型，不依赖 NapCat SDK 的版本和专有扩展
+
+如果后续大量使用 NapCat 专有 API，可新增 `NapCatSdkGateway`，不得让 Bot Core 直接依赖 SDK 类型。
+
+## 35.3 WebSocket 可靠性
+
+连接行为必须满足：
+
+- 使用 `Authorization: Bearer <token>` 请求头连接正向 WebSocket
+- 首次连接失败或异常断开时执行指数退避重连，并设置最大退避时间
+- 每个 API 请求生成唯一 `echo`，通过 `echo` 关联响应
+- API 请求必须设置超时；断线时立即拒绝所有未完成请求
+- 主动关闭时停止重连，等待正在处理的消息完成后退出
+- 收到生命周期、心跳和其他非消息事件时安全忽略或记录调试日志
+
+应用就绪条件为：
+
+```text
+HTTP Server 已启动
+    +
+PostgreSQL 可访问
+    +
+OneBot WebSocket 已连接
+```
+
+`/health/live` 只表示 Node.js 进程存活，`/health/ready` 按上述依赖状态返回就绪结果。
+
+## 35.4 内部消息模型
+
+内部消息必须保留消息段，不能只保存 `raw_message` 或拼接后的文本：
+
+```ts
+export interface BotMessage {
+  id: string
+  platform: 'qq'
+  selfId: string
+  chatType: 'private' | 'group'
+  userId: string
+  groupId?: string
+  text: string
+  segments: readonly BotMessageSegment[]
+  mentionsBot: boolean
+  timestamp: number
+}
+```
+
+边界规则：
+
+- 所有 QQ 标识进入 Bot Core 后统一转换为 `string`
+- `text` 只合并 `text` 消息段
+- `mentionsBot` 通过 `at` 消息段的目标 QQ 与 `self_id` 比较，不解析显示文本
+- 机器人自身发送的消息、空文本消息和不支持的消息类型不进入 AI Handler
+- 群聊交给 AI 前移除用于触发的机器人 `at` 消息段
+
+## 35.5 路由优先级
+
+消息处理顺序固定为：
+
+```text
+事件校验
+  ↓
+忽略机器人自身消息
+  ↓
+群白名单与 @机器人触发条件
+  ↓
+消息去重
+  ↓
+权限和群启用状态
+  ↓
+限流
+  ↓
+指令解析 / AI
+```
+
+指令优先于 AI 对话。群聊中的 `/ping`、`/help` 只有在 `@机器人` 后才执行，避免机器人响应群内其他 Bot 的通用指令。
+
+未 `@机器人` 或不在白名单中的群消息必须静默忽略，不占用去重缓存和限流额度，也不得发送限流提示。
+
+同一 `conversation_key` 的消息必须串行处理，不同会话可以并行处理，避免历史消息读取、LLM 回复和消息写入发生乱序。
+
+## 35.6 限流与去重的 MVP 策略
+
+Redis 延后到 Phase 8。本次使用带过期清理的进程内存实现：
+
+- 私聊按用户限制为 10 秒内 5 条
+- 群聊按群限制为 10 秒内 10 条
+- 按 `platform + chat_type + peer_id + message_id` 去重 5 分钟，其中私聊 `peer_id` 为用户 QQ，群聊 `peer_id` 为群 QQ
+- 设置缓存项上限，避免长期运行导致无界内存增长
+
+数据库同时对外部消息标识建立唯一约束，防止进程重启后重复持久化。`external_message_id` 保存包含会话范围的规范键，例如 `private:{userId}:{messageId}` 或 `group:{groupId}:{messageId}`，并与 `platform` 组成唯一索引。内存去重仅用于尽早阻止重复调用 LLM 和重复回复。多实例部署前必须迁移到 Redis 原子限流和去重。
+
+## 35.7 数据库约束
+
+V1.0 的四张表需要补充以下约束：
+
+- `users` 增加 `role`，取值为 `OWNER`、`ADMIN`、`USER`、`BLOCKED`
+- `conversations.user_id` 和 `conversations.group_id` 增加外键及查询索引
+- `messages.conversation_id` 增加外键和 `(conversation_id, created_at, id)` 索引
+- `messages` 增加 `platform`、`external_message_id`，并为非空外部消息标识建立唯一约束
+- `messages.role`、用户状态和角色使用数据库约束限制非法值
+- 删除用户或群不得级联删除消息历史；MVP 使用受限删除或 `SET NULL`
+
+`/clear` 的语义为删除当前 Conversation 的消息记录，但保留 Conversation、用户和群记录。
+
+## 35.8 LLM Provider 决策
+
+业务层只依赖 `LLMProvider`。首个实现使用 OpenAI SDK 的 Responses API，并显式设置 `store: false`，会话历史由 PostgreSQL 管理，不依赖供应商保存会话状态。
+
+配置必须包括：
+
+```bash
+OPENAI_API_KEY=
+OPENAI_BASE_URL=
+OPENAI_MODEL=
+OPENAI_SYSTEM_PROMPT=
+LLM_HISTORY_LIMIT=20
+```
+
+规则：
+
+- 每次最多加载最近 `LLM_HISTORY_LIMIT` 条历史消息
+- 用户消息持久化成功后再请求 LLM
+- LLM 成功返回后保存 Assistant 消息，再发送到 QQ
+- LLM 失败时记录脱敏错误并回复统一错误文案，不保存伪造的 Assistant 消息
+- `/ping`、`/help` 和 `/clear` 不进入 LLM 上下文
+
+## 35.9 Fastify 的职责
+
+MVP 中 Fastify 不承载 OneBot WebSocket，只提供：
+
+- `GET /health/live`
+- `GET /health/ready`
+
+健康检查不得返回密钥、数据库连接串、QQ 号或完整异常堆栈。
+
+## 35.10 配置与安全边界
+
+- 启动时使用 Zod 一次性校验环境变量，配置无效时快速失败
+- `NAPCAT_TOKEN`、`OPENAI_API_KEY` 和 `DATABASE_URL` 不写入日志
+- `BOT_OWNER_QQ` 用于首次识别 Owner；数据库中已存在的角色不得被普通消息覆盖
+- `ALLOWED_GROUP_IDS` 为空时默认不启用任何群的 AI 回复，必须显式配置群白名单
+- 发送文本设置长度上限；超长 LLM 回复按安全边界分段发送，并限制最大总长度
+- 不执行 Shell、任意 SQL、文件读取或群管理类 Tool
+
+## 35.11 退出与错误处理
+
+进程收到 `SIGINT` 或 `SIGTERM` 后按以下顺序退出：
+
+```text
+停止接收新的 HTTP 请求和 OneBot 事件
+  ↓
+等待正在处理的消息完成（有总超时）
+  ↓
+关闭 OneBot WebSocket
+  ↓
+关闭 PostgreSQL 连接池
+  ↓
+退出进程
+```
+
+消息处理异常不得导致 WebSocket 事件监听器产生未处理的 Promise rejection。
+
+## 35.12 验收分层
+
+自动验证：
+
+- ESLint 无新增错误
+- TypeScript `--noEmit` 类型检查通过
+- Vitest 覆盖消息映射、群聊 `at` 识别、指令解析、限流、去重和路由行为
+- Docker Compose 配置可被静态解析
+
+人工集成验证：
+
+- NapCatQQ 登录真实 QQ 账号
+- 正向 WebSocket 鉴权和重连
+- 私聊 `/ping`、`/help`、`/clear` 与 AI 对话
+- 白名单群中 `@机器人` 对话；未 `@` 时不回复
+- PostgreSQL 数据写入与服务重启后的对话恢复
+
+自动验证通过不等同于真实 QQ、NapCat、PostgreSQL、OpenAI API 或 Docker 运行时验证。
+
+## 35.13 参考标准
+
+- NapCatQQ：<https://github.com/NapNeko/NapCatQQ>
+- OneBot 11：<https://github.com/botuniverse/onebot-11>
+- OneBot 11 消息事件：<https://github.com/botuniverse/onebot-11/blob/master/event/message.md>
+- OneBot 11 消息段：<https://github.com/botuniverse/onebot-11/blob/master/message/segment.md>
+- Node.js Release Schedule：<https://nodejs.org/en/about/previous-releases>
