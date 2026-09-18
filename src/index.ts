@@ -7,7 +7,7 @@ import { OneBotClient } from './gateway/qq/client.js'
 import { mapOneBotMessage } from './gateway/qq/mapper.js'
 import { createQqSender } from './gateway/qq/sender.js'
 import { createHttpServer } from './http/server.js'
-import { createOpenAiProvider } from './llm/openai-provider.js'
+import { createOpenAiCompatibleProvider } from './llm/openai-compatible-provider.js'
 import { BotRouter } from './bot/router.js'
 import { createLogger, safeError } from './utils/logger.js'
 
@@ -24,7 +24,7 @@ const oneBot = new OneBotClient({
 })
 const gateway = createQqSender(oneBot)
 const commands = new CommandRegistry(createBuiltinCommands(repository))
-const llm = createOpenAiProvider(config.OPENAI_API_KEY, config.OPENAI_MODEL, config.OPENAI_BASE_URL)
+const llm = createOpenAiCompatibleProvider(config.OPENAI_API_KEY, config.OPENAI_MODEL, config.OPENAI_BASE_URL)
 const router = new BotRouter({ config, repository, llm, gateway, commands, logger })
 const http = createHttpServer(database, oneBot)
 

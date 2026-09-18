@@ -6,7 +6,7 @@
 
 - 私聊 AI、白名单群内 `@机器人` AI；群白名单为空时完全不回复群消息。
 - `/ping`、`/help`、`/clear`，群命令同样必须 `@机器人`。
-- PostgreSQL 会话持久化，OpenAI Responses API（`store: false`），OneBot 鉴权、重连、echo 关联与超时。
+- PostgreSQL 会话持久化，OpenAI-compatible Chat Completions，OneBot 鉴权、重连、echo 关联与超时。
 - 单进程限流、五分钟消息去重、按会话串行、健康检查与优雅退出。
 - GitHub Actions 自动发布 `linux/amd64` 和 `linux/arm64` 的 GHCR 镜像，服务器无需克隆源码或现场构建。
 
@@ -17,7 +17,7 @@ QQ 私聊或群聊消息
   -> NapCatQQ 登录的机器人 QQ 账号
   -> OneBot 11 正向 WebSocket
   -> 本项目进行权限、限流、指令和会话处理
-  -> PostgreSQL 保存会话，OpenAI 生成回答
+  -> PostgreSQL 保存会话，配置的模型服务商生成回答
   -> OneBot send_private_msg/send_group_msg
   -> NapCatQQ 将回答发送到 QQ
 ```
@@ -33,7 +33,7 @@ QQ 私聊或群聊消息
 - Node.js 24 或更高版本。
 - pnpm 10。
 - PostgreSQL 16。
-- 可用的 OpenAI API Key，或者兼容 OpenAI Responses API 的服务。
+- 可用的模型服务商 API Key，以及兼容 OpenAI Chat Completions 的服务。
 - NapCatQQ 和一个用于登录 NapCatQQ 的 QQ 账号。
 
 建议为机器人准备单独的 QQ 账号，不要使用日常主账号。QQ 账号和密码不需要写入本项目的 `.env`；登录操作应在 NapCatQQ 中完成。使用个人 QQ 账号运行非官方机器人可能触发平台风控，请自行评估使用风险。
@@ -71,7 +71,8 @@ NAPCAT_WS_URL=ws://127.0.0.1:3001
 NAPCAT_TOKEN=与NapCatQQ中配置的Token一致
 BOT_OWNER_QQ=机器人所有者的QQ号
 ALLOWED_GROUP_IDS=允许使用机器人的QQ群号
-OPENAI_API_KEY=你的OpenAIAPIKey
+OPENAI_API_KEY=模型服务商APIKey
+OPENAI_BASE_URL=模型服务商的OpenAI兼容API基础地址
 OPENAI_MODEL=gpt-4.1-mini
 ```
 
@@ -81,8 +82,28 @@ OPENAI_MODEL=gpt-4.1-mini
 - `NAPCAT_TOKEN`：NapCatQQ WebSocket 鉴权 Token。NapCatQQ 未设置 Token 时可以留空，但不建议用于生产环境。
 - `BOT_OWNER_QQ`：机器人所有者的个人 QQ 号，可以留空。它不是登录 NapCatQQ 的机器人 QQ 号。
 - `ALLOWED_GROUP_IDS`：允许机器人回复的 QQ 群号，多个群号使用英文逗号分隔，例如 `123456,789012`。留空时机器人不会回复任何群消息。
-- `OPENAI_BASE_URL`：使用兼容服务时填写对应 API 地址，直接使用 OpenAI 时可以留空。
+- `OPENAI_API_KEY`：变量名为兼容历史配置而保留；接入 DeepSeek 或阿里云百炼时填写对应服务商的 API Key，不是 OpenAI API Key。
+- `OPENAI_BASE_URL`：服务商的 OpenAI-compatible API 基础地址；直接使用 OpenAI 时可以留空。
+- `OPENAI_MODEL`：服务商提供的模型名称，必须与 `OPENAI_BASE_URL` 对应。
 - `OPENAI_SYSTEM_PROMPT`：机器人的系统提示词。
+
+DeepSeek 配置示例：
+
+```dotenv
+OPENAI_API_KEY=你的DeepSeekAPIKey
+OPENAI_BASE_URL=https://api.deepseek.com
+OPENAI_MODEL=deepseek-flash
+```
+
+阿里云百炼通义千问配置示例：
+
+```dotenv
+OPENAI_API_KEY=你的百炼APIKey
+OPENAI_BASE_URL=https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+OPENAI_MODEL=qwen3.8-flash
+```
+
+阿里云百炼的 API Key、业务空间和接口地址具有地域对应关系，应按实际开通地域替换示例中的北京地址。
 
 机器人 QQ 号不需要单独写入配置。项目会从 OneBot 消息事件的 `self_id` 自动识别当前机器人账号。
 
