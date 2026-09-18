@@ -1,0 +1,11 @@
+CREATE TYPE "user_role" AS ENUM ('OWNER', 'ADMIN', 'USER', 'BLOCKED');
+CREATE TYPE "user_status" AS ENUM ('ACTIVE', 'BLOCKED');
+CREATE TYPE "message_role" AS ENUM ('system', 'user', 'assistant', 'tool');
+CREATE TABLE "users" ("id" uuid PRIMARY KEY DEFAULT gen_random_uuid(), "qq_user_id" varchar(32) NOT NULL, "nickname" varchar(100), "status" "user_status" NOT NULL DEFAULT 'ACTIVE', "role" "user_role" NOT NULL DEFAULT 'USER', "created_at" timestamptz NOT NULL DEFAULT now(), "updated_at" timestamptz NOT NULL DEFAULT now(), CONSTRAINT "users_qq_user_id_unique" UNIQUE("qq_user_id"));
+CREATE TABLE "groups" ("id" uuid PRIMARY KEY DEFAULT gen_random_uuid(), "qq_group_id" varchar(32) NOT NULL, "name" varchar(255), "enabled" boolean NOT NULL DEFAULT true, "created_at" timestamptz NOT NULL DEFAULT now(), "updated_at" timestamptz NOT NULL DEFAULT now(), CONSTRAINT "groups_qq_group_id_unique" UNIQUE("qq_group_id"));
+CREATE TABLE "conversations" ("id" uuid PRIMARY KEY DEFAULT gen_random_uuid(), "conversation_key" varchar(128) NOT NULL, "user_id" uuid REFERENCES "users"("id") ON DELETE SET NULL, "group_id" uuid REFERENCES "groups"("id") ON DELETE SET NULL, "created_at" timestamptz NOT NULL DEFAULT now(), "updated_at" timestamptz NOT NULL DEFAULT now(), CONSTRAINT "conversations_key_unique" UNIQUE("conversation_key"));
+CREATE TABLE "messages" ("id" uuid PRIMARY KEY DEFAULT gen_random_uuid(), "conversation_id" uuid NOT NULL REFERENCES "conversations"("id") ON DELETE RESTRICT, "role" "message_role" NOT NULL, "content" text NOT NULL, "platform" varchar(16), "external_message_id" varchar(128), "created_at" timestamptz NOT NULL DEFAULT now(), CONSTRAINT "messages_external_identity_pair" CHECK (("platform" is null and "external_message_id" is null) or ("platform" is not null and "external_message_id" is not null)));
+CREATE UNIQUE INDEX "messages_external_id_unique" ON "messages" ("platform", "external_message_id") WHERE "external_message_id" IS NOT NULL;
+CREATE INDEX "conversations_user_idx" ON "conversations" ("user_id");
+CREATE INDEX "conversations_group_idx" ON "conversations" ("group_id");
+CREATE INDEX "messages_conversation_created_idx" ON "messages" ("conversation_id", "created_at", "id");
