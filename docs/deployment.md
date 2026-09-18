@@ -124,11 +124,11 @@ sudo docker compose version
 ghcr.io/fncheng/qqbot
 ```
 
-GitHub Actions 在以下情况自动发布镜像：
+GitHub Actions **只会在推送 `v*` Git 标签时**自动发布镜像：
 
-- 推送到 `master`：更新 `latest` 和 `sha-<提交摘要>` 镜像标签。
-- 推送 `v*` Git 标签：发布 `v1.2.3`、`1.2.3`、`1.2` 等版本化标签，并创建同名 GitHub Release。
-- 在 GitHub Actions 页面手动运行工作流：按照当前分支或标签生成对应镜像标签。
+- 例如推送 `v1.2.3` 会发布 `v1.2.3`、`1.2.3`、`1.2`、`latest` 和 `sha-<提交摘要>` 镜像标签。
+- 同一次工作流会创建同名 GitHub Release，并上传版本对应的部署压缩包。
+- 仅推送 `master` 不会构建镜像、不更新 GHCR Package，也不会创建 GitHub Release。
 
 生产环境应使用不可变的版本标签或镜像 digest，不要长期跟随 `latest`。项目维护者可以这样发布版本：
 
@@ -160,22 +160,7 @@ tar -xzf "qqbot-deploy-${VERSION}.tar.gz"
 ls docker-compose.server.yml .env.server.example docs/deployment.md
 ```
 
-### 4.2 尚未发布版本时使用 `master`
-
-仅用于首次验证或测试环境：
-
-```bash
-sudo mkdir -p /opt/qqbot
-sudo chown "$USER":"$USER" /opt/qqbot
-cd /opt/qqbot
-
-curl -fLO https://raw.githubusercontent.com/fncheng/qqbot/master/docker-compose.server.yml
-curl -fLO https://raw.githubusercontent.com/fncheng/qqbot/master/.env.server.example
-```
-
-此方式默认拉取 `ghcr.io/fncheng/qqbot:latest`，部署文件与镜像可能在更新过程中短暂不一致，不建议作为长期生产更新方式。
-
-### 4.3 GHCR 镜像权限
+### 4.2 GHCR 镜像权限
 
 GHCR 包第一次发布时通常是私有的。进入 GitHub 仓库的 Packages 页面，将 `qqbot` 容器包设为 Public 后，服务器可以匿名拉取。
 
