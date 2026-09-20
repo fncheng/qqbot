@@ -444,7 +444,7 @@ sudo docker compose -f docker-compose.server.yml up -d
 
 运行中的容器不会自动重新读取 `.env`。修改实际生效的 `.env` 后，必须重新创建 `qq-bot` 容器；仅执行 `restart qq-bot` 不会加载新的环境变量。`.env.server.example` 只是模板，修改它不会影响已部署服务。
 
-适用于 `ALLOWED_GROUP_IDS`、`OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`、`OPENAI_SYSTEM_PROMPT`、`LLM_HISTORY_LIMIT` 等一般机器人配置：
+适用于 `ALLOWED_GROUP_IDS`、`OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`、`LLM_REASONING_EFFORT`、`OPENAI_SYSTEM_PROMPT`、`LLM_HISTORY_LIMIT` 等一般机器人配置：
 
 ```bash
 sudo docker compose -f docker-compose.server.yml up -d --force-recreate qq-bot

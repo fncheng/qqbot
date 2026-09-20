@@ -13,4 +13,11 @@ describe('外部边界校验', () => {
     expect(() => loadConfig({ ...base, DATABASE_URL: 'mysql://localhost/db' })).toThrow()
     expect(() => loadConfig({ ...base, NAPCAT_WS_URL: 'http://localhost:3001' })).toThrow()
   })
+
+  it('仅接受标准推理强度，并保留 none 作为关闭推理的显式值', () => {
+    const base = { DATABASE_URL: 'postgresql://u:p@localhost/db', NAPCAT_WS_URL: 'wss://localhost:3001', OPENAI_API_KEY: 'key', OPENAI_MODEL: 'model', OPENAI_SYSTEM_PROMPT: 'system' }
+    expect(loadConfig({ ...base, LLM_REASONING_EFFORT: 'none' }).LLM_REASONING_EFFORT).toBe('none')
+    expect(loadConfig({ ...base, LLM_REASONING_EFFORT: 'high' }).LLM_REASONING_EFFORT).toBe('high')
+    expect(() => loadConfig({ ...base, LLM_REASONING_EFFORT: 'ultra' })).toThrow()
+  })
 })

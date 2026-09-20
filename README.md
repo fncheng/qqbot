@@ -76,6 +76,7 @@ GROUP_SUMMARY_ENABLED_GROUP_IDS=已同意归档并启用每日总结的QQ群号
 OPENAI_API_KEY=模型服务商APIKey
 OPENAI_BASE_URL=模型服务商的OpenAI兼容API基础地址
 OPENAI_MODEL=gpt-4.1-mini
+LLM_REASONING_EFFORT=
 ```
 
 配置说明：
@@ -89,6 +90,7 @@ OPENAI_MODEL=gpt-4.1-mini
 - `OPENAI_API_KEY`：变量名为兼容历史配置而保留；接入 DeepSeek 或阿里云百炼时填写对应服务商的 API Key，不是 OpenAI API Key。
 - `OPENAI_BASE_URL`：服务商的 OpenAI-compatible API 基础地址；直接使用 OpenAI 时可以留空。
 - `OPENAI_MODEL`：服务商提供的模型名称，必须与 `OPENAI_BASE_URL` 对应。
+- `LLM_REASONING_EFFORT`：留空时不发送推理参数，由模型决定默认行为；`none` 请求关闭推理；`minimal`、`low`、`medium`、`high`、`xhigh` 请求相应推理强度。仅支持标准 `reasoning_effort` 参数的模型服务可使用此配置；当前 `gpt-4.1-mini` 不需要配置，应保持留空。
 - `OPENAI_SYSTEM_PROMPT`：机器人的系统提示词。
 
 DeepSeek 配置示例：

@@ -27,7 +27,7 @@ const oneBot = new OneBotClient({
 })
 const gateway = createQqSender(oneBot)
 const commands = new CommandRegistry(createBuiltinCommands(repository))
-const llm = createOpenAiCompatibleProvider(config.OPENAI_API_KEY, config.OPENAI_MODEL, config.OPENAI_BASE_URL)
+const llm = createOpenAiCompatibleProvider(config.OPENAI_API_KEY, config.OPENAI_MODEL, config.OPENAI_BASE_URL, config.LLM_REASONING_EFFORT)
 const groupSummaryService = new GroupSummaryService({ config, repository: groupSummaryRepository, llm })
 const router = new BotRouter({ config, repository, groupSummaryService, llm, gateway, commands, logger })
 const http = createHttpServer(database, oneBot)

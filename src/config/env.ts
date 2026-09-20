@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import { z } from 'zod'
+import { reasoningEffortValues } from '../llm/types.js'
 
 const emptyToUndefined = (value: unknown): unknown => (value === '' ? undefined : value)
 function parseGroupIds(value: string): ReadonlySet<string> { return new Set(value.split(',').map((id) => id.trim()).filter(Boolean)) }
@@ -26,6 +27,8 @@ const envSchema = z.object({
   OPENAI_API_KEY: z.string().min(1),
   OPENAI_BASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
   OPENAI_MODEL: z.string().min(1),
+  // 留空时不干预服务商默认行为；非空时必须是 Chat Completions 支持的标准推理强度。
+  LLM_REASONING_EFFORT: z.preprocess(emptyToUndefined, z.enum(reasoningEffortValues).optional()),
   OPENAI_SYSTEM_PROMPT: z.string().min(1),
   LLM_HISTORY_LIMIT: z.coerce.number().int().min(1).max(100).default(20),
   ONEBOT_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(100).max(60000).default(10000),

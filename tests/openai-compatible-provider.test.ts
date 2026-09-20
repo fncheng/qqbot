@@ -31,4 +31,16 @@ describe('OpenAI-compatible LLM 适配器', () => {
 
     await expect(provider.chat([{ role: 'user', content: '你好' }])).rejects.toThrow('LLM 未返回文本内容')
   })
+
+  it('配置推理强度时向 Chat Completions 传入标准参数', async () => {
+    mocks.createCompletion.mockResolvedValue({ choices: [{ message: { content: '结果' } }] })
+    const provider = createOpenAiCompatibleProvider('provider-key', 'reasoning-model', undefined, 'high')
+
+    await expect(provider.chat([{ role: 'user', content: '复杂问题' }])).resolves.toBe('结果')
+    expect(mocks.createCompletion).toHaveBeenCalledWith({
+      model: 'reasoning-model',
+      messages: [{ role: 'user', content: '复杂问题' }],
+      reasoning_effort: 'high'
+    })
+  })
 })
