@@ -6,6 +6,7 @@ import { createConversationRepository } from './database/repositories/conversati
 import { createGroupSummaryRepository } from './database/repositories/group-summary-repository.js'
 import { OneBotClient } from './gateway/qq/client.js'
 import { mapOneBotMessage } from './gateway/qq/mapper.js'
+import { createQqQuotedMessageResolver } from './gateway/qq/quoted-message-resolver.js'
 import { createQqSender } from './gateway/qq/sender.js'
 import { createHttpServer } from './http/server.js'
 import { createOpenAiCompatibleProvider } from './llm/openai-compatible-provider.js'
@@ -26,10 +27,11 @@ const oneBot = new OneBotClient({
   }
 })
 const gateway = createQqSender(oneBot)
+const quotedMessageResolver = createQqQuotedMessageResolver(oneBot)
 const commands = new CommandRegistry(createBuiltinCommands(repository))
 const llm = createOpenAiCompatibleProvider(config.OPENAI_API_KEY, config.OPENAI_MODEL, config.OPENAI_BASE_URL, config.LLM_REASONING_EFFORT)
 const groupSummaryService = new GroupSummaryService({ config, repository: groupSummaryRepository, llm })
-const router = new BotRouter({ config, repository, groupSummaryService, llm, gateway, commands, logger })
+const router = new BotRouter({ config, repository, groupSummaryService, llm, quotedMessageResolver, gateway, commands, logger })
 const http = createHttpServer(database, oneBot)
 
 /** 清理任务独立于群事件触发，避免闲置服务持续保留超过配置期限的数据。 */

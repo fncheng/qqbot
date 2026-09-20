@@ -71,4 +71,39 @@ describe('路由关键行为', () => {
     await router.handle(makeMessage())
     expect(llm.chat).not.toHaveBeenCalled(); expect(gateway.sendText).not.toHaveBeenCalled()
   })
+  it('将被引用的文本和图片加入当前模型请求，但不持久化临时图片 URL', async () => {
+    const repository: ConversationRepository = {
+      ensureUser: vi.fn().mockResolvedValue({ id: 'u', blocked: false }), ensureGroup: vi.fn(), getOrCreate: vi.fn().mockResolvedValue('c'),
+      addMessage: vi.fn().mockResolvedValue(true), history: vi.fn().mockResolvedValue([{ role: 'user', content: '已持久化的引用内容' }]), clear: vi.fn()
+    }
+    const llm: LlmProvider = { chat: vi.fn().mockResolvedValue('评论结果') }
+    const gateway: MessageGateway = { sendText: vi.fn().mockResolvedValue(undefined) }
+    const quotedMessageResolver = { resolve: vi.fn().mockResolvedValue({ messageId: 'quoted', senderId: 'other', text: '被引用的文本[图片]', images: [{ url: 'https://example.com/image.jpg' }] }) }
+    const router = new BotRouter({ config: config(), repository, llm, quotedMessageResolver, gateway, commands: new CommandRegistry([]), logger: pino({ enabled: false }) })
+
+    await router.handle(makeMessage({ text: '请评论', segments: [{ type: 'reply', messageId: 'quoted' }, { type: 'text', text: '请评论' }] }))
+
+    expect(repository.addMessage).toHaveBeenCalledWith('c', 'user', expect.stringContaining('被引用的文本[图片]'), 'private:user:m1')
+    expect(repository.addMessage).not.toHaveBeenCalledWith('c', 'user', expect.stringContaining('https://example.com/image.jpg'), expect.anything())
+    expect(llm.chat).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ role: 'system', content: expect.stringContaining('第三方非可信资料') }),
+      { role: 'user', content: [
+        { type: 'text', text: expect.stringContaining('被引用的文本[图片]') },
+        { type: 'image_url', image_url: { url: 'https://example.com/image.jpg', detail: 'auto' } }
+      ] }
+    ]))
+  })
+  it('引用消息无法回查时明确提示且不请求模型', async () => {
+    const repository: ConversationRepository = { ensureUser: vi.fn().mockResolvedValue({ id: 'u', blocked: false }), ensureGroup: vi.fn(), getOrCreate: vi.fn().mockResolvedValue('c'), addMessage: vi.fn(), history: vi.fn(), clear: vi.fn() }
+    const llm: LlmProvider = { chat: vi.fn() }
+    const gateway: MessageGateway = { sendText: vi.fn().mockResolvedValue(undefined) }
+    const quotedMessageResolver = { resolve: vi.fn().mockResolvedValue(null) }
+    const router = new BotRouter({ config: config(), repository, llm, quotedMessageResolver, gateway, commands: new CommandRegistry([]), logger: pino({ enabled: false }) })
+
+    await router.handle(makeMessage({ text: '请评论', segments: [{ type: 'reply', messageId: 'missing' }, { type: 'text', text: '请评论' }] }))
+
+    expect(llm.chat).not.toHaveBeenCalled()
+    expect(repository.addMessage).not.toHaveBeenCalled()
+    expect(gateway.sendText).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('无法读取被引用的消息') }))
+  })
 })

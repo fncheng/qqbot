@@ -3,8 +3,22 @@ export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
 
 export interface TextSegment { readonly type: 'text'; readonly text: string }
 export interface AtSegment { readonly type: 'at'; readonly target: string }
+export interface ReplySegment { readonly type: 'reply'; readonly messageId: string }
+export interface ImageSegment { readonly type: 'image'; readonly file: string; readonly url?: string; readonly summary?: string }
 export interface UnsupportedSegment { readonly type: 'unsupported'; readonly segmentType: string }
-export type BotMessageSegment = TextSegment | AtSegment | UnsupportedSegment
+export type BotMessageSegment = TextSegment | AtSegment | ReplySegment | ImageSegment | UnsupportedSegment
+
+export interface QuotedImage { readonly url: string; readonly summary?: string }
+export interface QuotedMessage {
+  readonly messageId: string
+  readonly senderId?: string
+  readonly senderDisplayName?: string
+  readonly text: string
+  readonly images: readonly QuotedImage[]
+}
+
+/** 按平台消息标识即时读取被引用消息，避免 Bot Core 依赖 OneBot API。 */
+export interface QuotedMessageResolver { resolve(message: BotMessage, messageId: string): Promise<QuotedMessage | null> }
 
 /** Bot Core 只依赖此统一模型，不依赖 OneBot 原始事件。 */
 export interface BotMessage {

@@ -1,13 +1,13 @@
 import OpenAI from 'openai'
-import type { LlmProvider, ReasoningEffort } from './types.js'
+import type { LlmContent, LlmProvider, ReasoningEffort } from './types.js'
 
 interface ChatCompletionRequest {
   readonly model: string
-  readonly messages: ReadonlyArray<{ readonly role: 'system' | 'user' | 'assistant'; readonly content: string }>
+  readonly messages: ReadonlyArray<{ readonly role: 'system' | 'user' | 'assistant'; readonly content: LlmContent }>
   readonly reasoning_effort?: ReasoningEffort
 }
 
-/** 调用 OpenAI-compatible Chat Completions，兼容 OpenAI、DeepSeek 和阿里云百炼等服务商。 */
+/** 调用 OpenAI-compatible Chat Completions；图片内容要求具体服务商和模型支持 Vision。 */
 export function createOpenAiCompatibleProvider(apiKey: string, model: string, baseURL?: string, reasoningEffort?: ReasoningEffort): LlmProvider {
   const client = new OpenAI({ apiKey, baseURL })
 

@@ -17,6 +17,17 @@ export function mapOneBotMessage(input: unknown): BotMessage | null {
     : event.message.map((segment) => {
       if (segment.type === 'text') return { type: 'text', text: asString(segment.data, 'text') }
       if (segment.type === 'at') return { type: 'at', target: asString(segment.data, 'qq') }
+      if (segment.type === 'reply') return { type: 'reply', messageId: asString(segment.data, 'id') }
+      if (segment.type === 'image') {
+        const url = asString(segment.data, 'url')
+        const summary = asString(segment.data, 'summary')
+        return {
+          type: 'image',
+          file: asString(segment.data, 'file'),
+          ...(url ? { url } : {}),
+          ...(summary ? { summary } : {})
+        }
+      }
       return { type: 'unsupported', segmentType: segment.type }
     })
   const selfId = String(event.self_id)

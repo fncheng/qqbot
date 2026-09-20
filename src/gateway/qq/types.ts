@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-const segmentSchema = z.object({ type: z.string(), data: z.record(z.string(), z.unknown()).default({}) })
+export const oneBotSegmentSchema = z.object({ type: z.string(), data: z.record(z.string(), z.unknown()).default({}) })
 export const oneBotMessageEventSchema = z.object({
   post_type: z.literal('message'),
   message_type: z.enum(['private', 'group']),
@@ -10,7 +10,7 @@ export const oneBotMessageEventSchema = z.object({
   group_id: z.union([z.string(), z.number()]).optional(),
   time: z.number().int().nonnegative(),
   raw_message: z.string().optional(),
-  message: z.array(segmentSchema).or(z.string())
+  message: z.array(oneBotSegmentSchema).or(z.string())
 })
 export type OneBotMessageEvent = z.infer<typeof oneBotMessageEventSchema>
 
