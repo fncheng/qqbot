@@ -5,6 +5,7 @@
 ## 功能
 
 - 私聊 AI、白名单群内 `@机器人` AI；群白名单为空时完全不回复群消息。
+- 可为白名单子集显式启用群聊每日总结：仅归档未 `@机器人` 的普通文本，按 `Asia/Shanghai` 当日 Map-Reduce 总结并缓存。
 - `/ping`、`/help`、`/clear`，群命令同样必须 `@机器人`。
 - PostgreSQL 会话持久化，OpenAI-compatible Chat Completions，OneBot 鉴权、重连、echo 关联与超时。
 - 单进程限流、五分钟消息去重、按会话串行、健康检查与优雅退出。
@@ -71,6 +72,7 @@ NAPCAT_WS_URL=ws://127.0.0.1:3001
 NAPCAT_TOKEN=与NapCatQQ中配置的Token一致
 BOT_OWNER_QQ=机器人所有者的QQ号
 ALLOWED_GROUP_IDS=允许使用机器人的QQ群号
+GROUP_SUMMARY_ENABLED_GROUP_IDS=已同意归档并启用每日总结的QQ群号
 OPENAI_API_KEY=模型服务商APIKey
 OPENAI_BASE_URL=模型服务商的OpenAI兼容API基础地址
 OPENAI_MODEL=gpt-4.1-mini
@@ -82,6 +84,8 @@ OPENAI_MODEL=gpt-4.1-mini
 - `NAPCAT_TOKEN`：NapCatQQ WebSocket 鉴权 Token。NapCatQQ 未设置 Token 时可以留空，但不建议用于生产环境。
 - `BOT_OWNER_QQ`：机器人所有者的个人 QQ 号，可以留空。它不是登录 NapCatQQ 的机器人 QQ 号。
 - `ALLOWED_GROUP_IDS`：允许机器人回复的 QQ 群号，多个群号使用英文逗号分隔，例如 `123456,789012`。留空时机器人不会回复任何群消息。
+- `GROUP_SUMMARY_ENABLED_GROUP_IDS`：已显式同意文本归档和每日总结的群号，必须是 `ALLOWED_GROUP_IDS` 的子集。多个群号使用英文逗号分隔；留空时默认关闭归档。
+- `GROUP_SUMMARY_TIMEZONE`：每日总结的自然日时区，默认 `Asia/Shanghai`。`GROUP_SUMMARY_RETENTION_DAYS` 默认 `7`，原始文本到期后会由每小时运行的清理任务删除；可通过 `GROUP_SUMMARY_CLEANUP_INTERVAL_MS` 调整周期。
 - `OPENAI_API_KEY`：变量名为兼容历史配置而保留；接入 DeepSeek 或阿里云百炼时填写对应服务商的 API Key，不是 OpenAI API Key。
 - `OPENAI_BASE_URL`：服务商的 OpenAI-compatible API 基础地址；直接使用 OpenAI 时可以留空。
 - `OPENAI_MODEL`：服务商提供的模型名称，必须与 `OPENAI_BASE_URL` 对应。
@@ -119,6 +123,7 @@ pnpm install
 
 ```bash
 psql "$DATABASE_URL" -f drizzle/0000_initial.sql
+psql "$DATABASE_URL" -f drizzle/0001_group_chat_summaries.sql
 ```
 
 如果 `DATABASE_URL` 只写在 `.env` 中，没有导出为 Shell 环境变量，也可以直接向 `psql` 传入实际连接地址。
@@ -157,7 +162,7 @@ docker compose -f docker-compose.server.yml up -d
 docker compose up -d
 ```
 
-PostgreSQL 首次创建命名卷时会自动执行 `drizzle/0000_initial.sql`；如果数据库命名卷已经存在，需要人工执行迁移。
+PostgreSQL 首次创建命名卷时会按文件名字典顺序自动执行 `drizzle/` 中全部 `.sql` 迁移。既有数据库命名卷不会自动重复执行新迁移；升级后需要按顺序人工执行新增文件，例如 `drizzle/0001_group_chat_summaries.sql`。
 
 基础 `docker-compose.yml` 中的机器人容器会连接 `postgres:5432`。如果 NapCatQQ 在 Docker 宿主机运行，应配置：
 
@@ -221,6 +226,18 @@ pong
 ```
 
 每个群成员在每个群中拥有独立的会话上下文，不会与其他群成员共用对话历史。
+
+如已为该群设置 `GROUP_SUMMARY_ENABLED_GROUP_IDS`，未 `@机器人` 的普通文本会被静默保存，用于本群每日总结；图片、文件、语音、空文本以及所有 `@机器人` 交互均不会归档。启用前应在群内告知成员文本保存期限与模型服务商的数据处理范围。
+
+群成员可发送以下任一明确请求获取本群当天总结：
+
+```text
+@机器人 /summary today
+@机器人 告诉我今天群内发生了什么
+@机器人 总结今天群聊
+```
+
+总结只读取当前群、按 `GROUP_SUMMARY_TIMEZONE` 计算的当天归档文本。当天没有新消息时会复用缓存；消息量超过配置上限时，回复会明确说明实际覆盖范围。
 
 ### 3. 在私聊中使用
 

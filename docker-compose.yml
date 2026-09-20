@@ -8,9 +8,9 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - '3000:3000'
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - 'host.docker.internal:host-gateway'
     restart: unless-stopped
   postgres:
     image: postgres:16-alpine
@@ -19,12 +19,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
       interval: 5s
       timeout: 3s
       retries: 10
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./drizzle/0000_initial.sql:/docker-entrypoint-initdb.d/0000_initial.sql:ro
+      # PostgreSQL 仅在新建数据卷时按文件名字典顺序执行目录中的全部 .sql 文件。
+      - ./drizzle:/docker-entrypoint-initdb.d:ro
 volumes:
   postgres_data:

@@ -41,7 +41,8 @@ services:
 
   migration-files:
     image: ${QQ_BOT_IMAGE:-ghcr.io/fncheng/qqbot:latest}
-    command: ['sh', '-c', 'cp /app/drizzle/0000_initial.sql /init/0000_initial.sql']
+    # PostgreSQL 仅在新建 postgres_data 卷时执行 /docker-entrypoint-initdb.d 中的 SQL；此处不连接数据库。
+    command: ['sh', '-c', 'cp /app/drizzle/*.sql /init/']
     volumes:
       - postgres_init:/init
     restart: 'no'

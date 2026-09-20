@@ -440,15 +440,39 @@ sudo docker compose -f docker-compose.server.yml down
 sudo docker compose -f docker-compose.server.yml up -d
 ```
 
-更新到新版本：
+### 修改一般机器人配置
+
+运行中的容器不会自动重新读取 `.env`。修改实际生效的 `.env` 后，必须重新创建 `qq-bot` 容器；仅执行 `restart qq-bot` 不会加载新的环境变量。`.env.server.example` 只是模板，修改它不会影响已部署服务。
+
+适用于 `ALLOWED_GROUP_IDS`、`OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`、`OPENAI_SYSTEM_PROMPT`、`LLM_HISTORY_LIMIT` 等一般机器人配置：
+
+```bash
+sudo docker compose -f docker-compose.server.yml up -d --force-recreate qq-bot
+sudo docker compose -f docker-compose.server.yml ps
+sudo docker compose -f docker-compose.server.yml logs --tail=200 qq-bot
+curl -i http://127.0.0.1:3000/health/ready
+```
+
+预期 `/health/ready` 返回 HTTP 200，且 `qq-bot` 日志显示 OneBot WebSocket 已连接。
+
+修改 `NAPCAT_TOKEN` 时，还必须在 NapCatQQ WebUI 的对应 WebSocket 服务端配置中填写完全相同的 Token，再重新创建 `qq-bot` 容器。
+
+`POSTGRES_PASSWORD`、`POSTGRES_USER` 和 `POSTGRES_DB` 不属于一般配置。已有 PostgreSQL 数据卷不会因修改 `.env` 自动更新数据库账号、密码或数据库名；应先完成数据库侧迁移，再重新创建 `qq-bot`。不要通过删除 PostgreSQL 数据卷来应用这些修改。
+
+### 更新 `qq-bot` 镜像
+
+先将 `.env` 中的 `QQ_BOT_IMAGE` 改为目标版本，再拉取镜像并重新创建业务容器：
 
 ```bash
 nano .env
 sudo docker compose -f docker-compose.server.yml pull qq-bot migration-files
 sudo docker compose -f docker-compose.server.yml up -d qq-bot
+sudo docker compose -f docker-compose.server.yml ps
+sudo docker compose -f docker-compose.server.yml logs --tail=200 qq-bot
+curl -i http://127.0.0.1:3000/health/ready
 ```
 
-先将 `.env` 的 `QQ_BOT_IMAGE` 改成目标版本，再执行拉取和启动命令。`migration-files` 与 `qq-bot` 必须使用同一个镜像版本。
+`migration-files` 与 `qq-bot` 必须使用同一个镜像版本。确认 `/health/ready` 返回 HTTP 200 后，再进行 QQ 私聊或群聊的 `/ping` 验证。
 
 如果使用新的 GitHub Release 部署包，先备份当前 `.env`，解压新部署包覆盖 Compose 和文档，再恢复 `.env` 并更新 `QQ_BOT_IMAGE`。不要用发布包中的模板覆盖包含真实密钥的 `.env`。
 

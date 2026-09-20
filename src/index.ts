@@ -3,18 +3,21 @@ import { CommandRegistry } from './commands/registry.js'
 import { loadConfig } from './config/env.js'
 import { createDatabase } from './database/client.js'
 import { createConversationRepository } from './database/repositories/conversation-repository.js'
+import { createGroupSummaryRepository } from './database/repositories/group-summary-repository.js'
 import { OneBotClient } from './gateway/qq/client.js'
 import { mapOneBotMessage } from './gateway/qq/mapper.js'
 import { createQqSender } from './gateway/qq/sender.js'
 import { createHttpServer } from './http/server.js'
 import { createOpenAiCompatibleProvider } from './llm/openai-compatible-provider.js'
 import { BotRouter } from './bot/router.js'
+import { GroupSummaryService } from './services/group-summary-service.js'
 import { createLogger, safeError } from './utils/logger.js'
 
 const config = loadConfig()
 const logger = createLogger()
 const database = createDatabase(config.DATABASE_URL)
 const repository = createConversationRepository(database.db)
+const groupSummaryRepository = createGroupSummaryRepository(database.db)
 const oneBot = new OneBotClient({
   url: config.NAPCAT_WS_URL, ...(config.NAPCAT_TOKEN === undefined ? {} : { token: config.NAPCAT_TOKEN }), timeoutMs: config.ONEBOT_REQUEST_TIMEOUT_MS, logger,
   onEvent: (event) => {
@@ -25,14 +28,23 @@ const oneBot = new OneBotClient({
 const gateway = createQqSender(oneBot)
 const commands = new CommandRegistry(createBuiltinCommands(repository))
 const llm = createOpenAiCompatibleProvider(config.OPENAI_API_KEY, config.OPENAI_MODEL, config.OPENAI_BASE_URL)
-const router = new BotRouter({ config, repository, llm, gateway, commands, logger })
+const groupSummaryService = new GroupSummaryService({ config, repository: groupSummaryRepository, llm })
+const router = new BotRouter({ config, repository, groupSummaryService, llm, gateway, commands, logger })
 const http = createHttpServer(database, oneBot)
+
+/** 清理任务独立于群事件触发，避免闲置服务持续保留超过配置期限的数据。 */
+function scheduleGroupSummaryCleanup(): void {
+  void groupSummaryService.cleanupExpired().catch((error: unknown) => logger.error({ error: safeError(error) }, '群聊总结过期数据清理失败'))
+}
+const groupSummaryCleanupTimer = setInterval(scheduleGroupSummaryCleanup, config.GROUP_SUMMARY_CLEANUP_INTERVAL_MS)
+scheduleGroupSummaryCleanup()
 
 let shuttingDown = false
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return
   shuttingDown = true
   logger.info({ signal }, '开始优雅退出')
+  clearInterval(groupSummaryCleanupTimer)
   oneBot.pauseEvents()
   await http.close()
   const deadline = Date.now() + config.SHUTDOWN_TIMEOUT_MS
@@ -51,6 +63,7 @@ try {
   logger.info({ port: config.PORT }, 'HTTP 健康检查服务已启动')
 } catch (error: unknown) {
   logger.fatal({ error: safeError(error) }, '服务启动失败')
+  clearInterval(groupSummaryCleanupTimer)
   oneBot.close()
   if (http.server.listening) await http.close()
   await database.close()

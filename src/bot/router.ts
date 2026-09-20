@@ -8,10 +8,23 @@ import { removeBotMention } from '../gateway/qq/mapper.js'
 import { ExpiringSet } from '../services/expiring-cache.js'
 import { MemoryRateLimiter } from '../services/rate-limiter.js'
 import { KeyedSerialQueue } from '../services/serial-queue.js'
+import { GroupSummaryService, isGroupSummaryRequest } from '../services/group-summary-service.js'
 import type { BotMessage, MessageGateway } from '../types/message.js'
 import { safeError } from '../utils/logger.js'
 
-export interface BotRouterDependencies { readonly config: AppConfig; readonly repository: ConversationRepository; readonly llm: LlmProvider; readonly gateway: MessageGateway; readonly commands: CommandRegistry; readonly logger: Logger; readonly dedupe?: ExpiringSet; readonly rateLimiter?: MemoryRateLimiter; readonly queue?: KeyedSerialQueue }
+export interface BotRouterDependencies {
+  readonly config: AppConfig
+  readonly repository: ConversationRepository
+  readonly groupSummaryService?: GroupSummaryService
+  readonly llm: LlmProvider
+  readonly gateway: MessageGateway
+  readonly commands: CommandRegistry
+  readonly logger: Logger
+  readonly dedupe?: ExpiringSet
+  readonly rateLimiter?: MemoryRateLimiter
+  readonly summaryRateLimiter?: MemoryRateLimiter
+  readonly queue?: KeyedSerialQueue
+}
 
 const MAX_REPLY_TOTAL = 6_000
 const MAX_REPLY_CHUNK = 1_500
@@ -23,16 +36,40 @@ function splitReply(text: string): readonly string[] { const safe = text.slice(0
 
 /** 固定路由优先级的 Bot Core；任何异常都在事件边界被捕获。 */
 export class BotRouter {
-  readonly #dedupe: ExpiringSet; readonly #rateLimiter: MemoryRateLimiter; readonly #queue: KeyedSerialQueue
-  constructor(private readonly deps: BotRouterDependencies) { this.#dedupe = deps.dedupe ?? new ExpiringSet(300_000, 50_000); this.#rateLimiter = deps.rateLimiter ?? new MemoryRateLimiter(); this.#queue = deps.queue ?? new KeyedSerialQueue() }
+  readonly #dedupe: ExpiringSet; readonly #rateLimiter: MemoryRateLimiter; readonly #summaryRateLimiter: MemoryRateLimiter; readonly #queue: KeyedSerialQueue
+  constructor(private readonly deps: BotRouterDependencies) {
+    this.#dedupe = deps.dedupe ?? new ExpiringSet(300_000, 50_000)
+    this.#rateLimiter = deps.rateLimiter ?? new MemoryRateLimiter()
+    // 总结消耗多个模型请求，使用独立且更严格的群级滑动窗口。
+    this.#summaryRateLimiter = deps.summaryRateLimiter ?? new MemoryRateLimiter(60_000, 2, 3)
+    this.#queue = deps.queue ?? new KeyedSerialQueue()
+  }
   async handle(message: BotMessage): Promise<void> {
     if (message.userId === message.selfId || !message.text.trim()) return
-    // 群聊触发条件先于去重和限流，避免无关群消息消耗机器人资源或触发限流回复。
-    if (message.chatType === 'group' && (!message.groupId || !this.deps.config.allowedGroupIds.has(message.groupId) || !message.mentionsBot)) return
+    // 未提及机器人的消息仅在同时满足白名单和显式总结开关时静默归档。
+    if (message.chatType === 'group' && (!message.groupId || !this.deps.config.allowedGroupIds.has(message.groupId))) return
+    if (message.chatType === 'group' && !message.mentionsBot) {
+      if (!this.deps.config.groupSummaryEnabledGroupIds.has(message.groupId!) || this.deps.groupSummaryService === undefined) return
+      // 第一阶段只归档完整纯文本事件，图文混合、文件和语音等非文本段不进入总结素材。
+      if (!message.segments.every((segment) => segment.type === 'text')) return
+      if (this.#dedupe.hasOrAdd(`${message.platform}:group-archive:${message.groupId}:${message.id}`)) return
+      await this.#queue.run(`group-archive:${message.groupId}`, async () => this.archiveGroupMessage(message))
+      return
+    }
     if (this.#dedupe.hasOrAdd(`${message.platform}:${externalMessageId(message)}`)) return
     const normalized = message.chatType === 'group' ? removeBotMention(message) : message
     if (!normalized.text) return
     await this.#queue.run(conversationKey(message), async () => this.process(normalized))
+  }
+  private async archiveGroupMessage(message: BotMessage): Promise<void> {
+    try {
+      const group = await this.deps.repository.ensureGroup(message.groupId!)
+      if (!group.enabled) return
+      await this.deps.groupSummaryService?.archive(group.id, message)
+    } catch (error) {
+      // 归档失败不能将未 @ 消息变成主动回复，但必须保留运维可见日志。
+      this.deps.logger.error({ error: safeError(error), messageId: message.id, groupId: message.groupId }, '群消息归档失败')
+    }
   }
   private async process(message: BotMessage): Promise<void> {
     try {
@@ -40,6 +77,12 @@ export class BotRouter {
       if (user.blocked) return
       const group = message.groupId ? await this.deps.repository.ensureGroup(message.groupId) : undefined
       if (group !== undefined && !group.enabled) return
+      if (message.groupId !== undefined && this.deps.config.groupSummaryEnabledGroupIds.has(message.groupId) && this.deps.groupSummaryService !== undefined && isGroupSummaryRequest(message.text)) {
+        if (!this.#summaryRateLimiter.allow(message)) { await this.reply(message, '群聊总结请求过于频繁，请稍后再试。'); return }
+        const result = await this.deps.groupSummaryService.summarize({ groupId: group!.id, qqGroupId: message.groupId })
+        await this.reply(message, result.content)
+        return
+      }
       // 权限与群启用状态确认后再计入限流，保证被封禁用户和禁用群始终静默。
       if (!this.#rateLimiter.allow(message)) { await this.reply(message, '请求过于频繁，请稍后再试。'); return }
       const conversationId = await this.deps.repository.getOrCreate(conversationKey(message), user.id, group?.id)
