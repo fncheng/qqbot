@@ -77,6 +77,8 @@ function selectLatestMessages(messages: readonly ArchivedGroupMessage[], maxMess
   let chars = 0
   for (let index = messages.length - 1; index >= 0 && selected.length < maxMessages; index -= 1) {
     const message = messages[index]
+    // `noUncheckedIndexedAccess` 下数组索引可能为空；保护异常数据或未来循环调整。
+    if (message === undefined) continue
     if (selected.length > 0 && chars + message.content.length > maxChars) break
     selected.push(message)
     chars += message.content.length
@@ -85,9 +87,12 @@ function selectLatestMessages(messages: readonly ArchivedGroupMessage[], maxMess
 }
 
 function coverageLine(messages: readonly ArchivedGroupMessage[], totalCount: number, timeZone: string): string {
+  const firstMessage = messages.at(0)
+  const lastMessage = messages.at(-1)
+  if (firstMessage === undefined || lastMessage === undefined) return ''
   const formatter = new Intl.DateTimeFormat('zh-CN', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-  const first = formatter.format(messages[0].sentAt)
-  const last = formatter.format(messages[messages.length - 1].sentAt)
+  const first = formatter.format(firstMessage.sentAt)
+  const last = formatter.format(lastMessage.sentAt)
   const limitNote = totalCount === messages.length ? '' : `，受配置上限影响，仅覆盖最新 ${messages.length} 条`
   return `\n\n本摘要基于今日 ${first}–${last} 的 ${messages.length} 条可读文本消息生成${limitNote}。`
 }
@@ -121,7 +126,9 @@ export class GroupSummaryService {
     const allMessages = await this.deps.repository.listMessages(groupId, identity.start, identity.end)
     if (allMessages.length === 0) return { content: '今天还没有可用于总结的群聊文本消息。', fromCache: false }
     const messages = selectLatestMessages(allMessages, this.deps.config.GROUP_SUMMARY_MAX_SOURCE_MESSAGES, this.deps.config.GROUP_SUMMARY_MAX_SOURCE_CHARS)
-    const latest = messages[messages.length - 1].sentAt
+    const latestMessage = messages.at(-1)
+    if (latestMessage === undefined) throw new Error('群聊消息筛选结果为空')
+    const latest = latestMessage.sentAt
     const cached = await this.deps.repository.findDailySummary(groupId, identity.date)
     if (cached !== null && cached.timezone === this.deps.config.GROUP_SUMMARY_TIMEZONE && cached.sourceMessageCount === messages.length && sameInstant(cached.sourceLatestMessageAt, latest)) {
       return { content: `${cached.content}${coverageLine(messages, allMessages.length, this.deps.config.GROUP_SUMMARY_TIMEZONE)}`, fromCache: true }
